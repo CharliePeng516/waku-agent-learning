@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LLM API Fundamentals — Lesson 1</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+
+<p class="kicker">Module 1 of 10 · LLM API fundamentals　(<a href="./0001-llm-api-fundamentals.zh.html">中文版</a>)</p>
+<h1>What actually happens on the wire</h1>
+
+<p>You already know the shape of a REST call: method, URL, headers, a JSON body, a JSON
+response. An LLM API call is that same shape with four unusual fields —
+<strong>system prompt</strong>, <strong>message history</strong>, <strong>tools</strong>,
+and <strong>token usage</strong> — layered on top. This lesson is about seeing that shape
+clearly, once, so every later module (structured output, tool calling, agents) reads as a
+variation on it instead of new magic.</p>
+
+<div class="source">
+<span class="box-label">Primary source</span>
+<p>Read (or skim) Anthropic's own
+<a href="https://platform.claude.com/docs">Messages API reference</a> before or after this
+lesson. Everything here traces back to it — this lesson is the tour, that's the manual.</p>
+</div>
+
+<h2>1. The request</h2>
+
+<p>Every call to an LLM sends, at minimum: which model, what standing instructions to
+follow, and the conversation so far. In Anthropic's shape:</p>
+
+<pre><code>client.messages.create(
+    model="claude-sonnet-5",
+    system="You are a terse, helpful assistant.",
+    messages=[
+        {"role": "user", "content": "What's 12% of 850?"}
+    ],
+    max_tokens=1024,
+)</code></pre>
+
+<p>Two things to notice, both easy to miss coming from a typical stateful backend:</p>
+<ul>
+<li><strong>The API is stateless.</strong> There's no session on the server. If this is
+turn 5 of a conversation, <code>messages</code> contains all 5 turns — you resend the
+entire history, every single call. That's why <code>waku-agent</code> keeps a
+<code>messages</code> list in memory and mutates it turn by turn rather than trusting the
+provider to "remember."</li>
+<li><strong><code>max_tokens</code> caps the reply, not the whole exchange.</strong> It's
+an output-only budget. Get it wrong and you don't get an error — you get a reply cut off
+mid-sentence, reported via <code>stop_reason: "max_tokens"</code>.</li>
+</ul>
+
+<h2>2. The response</h2>
+
+<p>The reply comes back as a <em>list of content blocks</em>, not a single string —
+because a single assistant turn can contain text <em>and</em> a request to call a tool in
+the same response:</p>
+
+<pre><code>Message(
+    content=[ContentBlock(type="text", text="12% of 850 is 102.")],
+    stop_reason="end_turn",
+    usage=Usage(input_tokens=24, output_tokens=11),
+)</code></pre>
+
+<p><code>stop_reason</code> is the field your code branches on. <code>"end_turn"</code>
+means the model is done talking to the human. Module 4 introduces
+<code>"tool_use"</code>, which means the opposite: the model isn't finished, it's asking
+your code to go run something and come back.</p>
+
+<div class="box concept">
+<span class="box-label">Concept</span>
+<p><code>usage</code> is not incidental telemetry — it's your bill, per call, and the
+number you'd alert on in production if it spiked. Get comfortable reading it now; module
+10 comes back to it for cost budgeting.</p>
+</div>
+
+<h2>3. Read it in the wild: <code>waku/loop/agent.py</code></h2>
+
+<p>Open <code>waku/loop/agent.py</code> in the <code>waku-agent</code> repo and find
+<code>run_loop</code>. Around line 79–86 is a bare, undecorated
+<code>client.messages.create(...)</code> call — the exact shape above, just with real
+variables. Then look at line 91:</p>
+
+<pre><code>messages.append({"role": "assistant", "content": response.content})</code></pre>
+
+<div class="box why">
+<span class="box-label">Why it's written this way</span>
+<p>That one line <em>is</em> the statelessness fix. The assistant's response gets appended
+back onto <code>messages</code> so the next call in the loop sees it as history. Skip that
+line and the model would "forget" its own previous turn on iteration 2 — because,
+mechanically, there is nothing to forget from. There's no server-side memory to lose.</p>
+</div>
+
+<p>Now find the comment block at the top of the file (lines 1–16). It writes the entire
+loop out as seven lines of pseudocode before any real code appears. Read those seven
+lines, then look at how closely the real function follows them. That gap — pseudocode to
+production code — is small on purpose, and closing it is most of what this whole
+curriculum is about.</p>
+
+<h2>4. There is no universal wire format</h2>
+
+<p>Open <code>waku/loop/models.py</code> and find the class <code>OpenAICompatClient</code>
+(around line 296). Its entire job is translating OpenAI's chat-completions shape into the
+Anthropic shape above, so the rest of the codebase never has to know which provider it's
+talking to.</p>
+
+<p>Skim <code>_to_openai</code> and <code>_create</code>. You don't need to understand
+every line yet — just confirm for yourself that the translation is doing real work: field
+names differ (<code>stop_reason</code> vs <code>finish_reason</code>), and tool-call
+arguments arrive as a JSON <em>string</em> on OpenAI's side that has to be parsed before it
+looks like Anthropic's already-parsed <code>input</code> dict.</p>
+
+<p>Full side-by-side table:
+<a href="../reference/api-request-response-cheatsheet.html">reference/api-request-response-cheatsheet.html</a>.</p>
+
+<div class="box checkpoint">
+<span class="box-label">Checkpoint</span>
+<div class="quiz" data-answer="0">
+  <p class="quiz-q">Which field name does the Anthropic Messages API use to tell your code why generation stopped?</p>
+  <div class="quiz-options">
+    <button class="quiz-opt">stop_reason</button>
+    <button class="quiz-opt">stop_status</button>
+    <button class="quiz-opt">stop_result</button>
+    <button class="quiz-opt">stop_signal</button>
+  </div>
+  <p class="quiz-feedback" hidden></p>
+</div>
+</div>
+
+<div class="box checkpoint">
+<div class="quiz" data-answer="0">
+  <p class="quiz-q">Why does <code>waku/loop/models.py</code> need ~110 lines translating OpenAI's format into Anthropic's shape?</p>
+  <div class="quiz-options">
+    <button class="quiz-opt">Two providers use different wire formats</button>
+    <button class="quiz-opt">OpenAI models are cheaper than Claude's</button>
+    <button class="quiz-opt">Anthropic requires a paid enterprise contract</button>
+    <button class="quiz-opt">OpenAI's SDK does not support streaming</button>
+  </div>
+  <p class="quiz-feedback" hidden></p>
+</div>
+</div>
+
+<h2>5. Exercise</h2>
+
+<div class="box exercise">
+<span class="box-label">Exercise — do this yourself, then bring it back for review</span>
+<p>Write a standalone Python script, <strong>outside</strong> the <code>waku</code>
+package (no imports from <code>waku.*</code>) — just the raw <code>anthropic</code> SDK.
+Use the key already in this repo's <code>.env</code>. The script should:</p>
+<ol>
+<li>Send a single user message asking a factual question you know the answer to.</li>
+<li>Print the reply text.</li>
+<li>Print <code>stop_reason</code> and both token counts from <code>usage</code>.</li>
+</ol>
+<p>Then, without looking anything up, extend it: add a <code>system</code> prompt that
+changes the assistant's tone or format (e.g. "answer in exactly one sentence, no
+punctuation"), rerun, and confirm the output actually changed. That's the whole exercise —
+no tools, no loop, no framework.</p>
+
+<details>
+<summary>Stuck on SDK setup, not the concept? (hint)</summary>
+<p>The <code>anthropic</code> package is already a dependency of this repo
+(<code>uv.lock</code>). The client constructor and the exact keyword arguments for
+<code>messages.create</code> are both visible in <code>waku/loop/models.py</code> and
+<code>waku/loop/agent.py</code> — you're allowed to look at those for syntax, the point of
+this exercise is understanding the request/response shape, not memorizing SDK method
+names.</p>
+</details>
+</div>
+
+<p>Bring your script back to the chat when you're done (or if you get stuck) — I'll review
+it with you rather than hand you a reference solution first.</p>
+
+<p class="ask-agent">Something in this lesson unclear, or want to go deeper on a point?
+Ask your teaching agent — that's what it's there for.</p>
+
+<div class="lesson-nav">
+<span>Glossary: <a href="../reference/glossary.html">reference/glossary.html</a></span>
+<span>Next: module 2, prompt &amp; context engineering — after this exercise is reviewed</span>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>LLM API 基础 — 第 1 课</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+
+<p class="kicker">第 1 课 / 共 10 课 · LLM API 基础　（<a href="./0001-llm-api-fundamentals.html">English version</a>）</p>
+<h1>线上到底发生了什么</h1>
+
+<p>你已经很熟悉一次 REST 调用的样子：method、URL、headers、一个 JSON body、一个 JSON 响应。
+LLM API 调用本质上还是这个样子，只是多套了四个不太一样的字段——<strong>系统提示词</strong>、
+<strong>消息历史</strong>、<strong>工具（tools）</strong>、以及<strong>用量统计（token usage）</strong>。
+这节课的目标就是先把这个结构看清楚、看一次，这样后面每一课（结构化输出、工具调用、agent）读起来
+都只是这个结构上的变体，而不是新的魔法。</p>
+
+<div class="source">
+<span class="box-label">推荐首选资料</span>
+<p>建议课前或课后通读一遍 Anthropic 官方的
+<a href="https://platform.claude.com/docs">Messages API 文档</a>。这节课里的一切最终都能追溯到那份文档——它是说明书，这节课是导览。</p>
+</div>
+
+<h2>1. 请求（Request）</h2>
+
+<p>每一次调用 LLM，至少要发送：用哪个模型、遵循什么常驻指令、以及到目前为止的完整对话。
+用 Anthropic 的格式写出来是这样：</p>
+
+<pre><code>client.messages.create(
+    model="claude-sonnet-5",
+    system="You are a terse, helpful assistant.",
+    messages=[
+        {"role": "user", "content": "What's 12% of 850?"}
+    ],
+    max_tokens=1024,
+)</code></pre>
+
+<p>有两点值得注意，对于习惯了"有状态"后端的人来说尤其容易忽略：</p>
+<ul>
+<li><strong>这个 API 是无状态的。</strong> 服务端不存在"会话"这种东西。如果这是对话的第 5 轮，
+<code>messages</code> 里就要包含全部 5 轮——每一次调用都要把完整历史重新发一遍。这也是为什么
+<code>waku-agent</code> 会在内存里维护一个 <code>messages</code> 列表并逐轮修改它，而不是指望
+provider 帮你"记住"什么。</li>
+<li><strong><code>max_tokens</code> 限制的是回复长度，不是整次交互的长度。</strong>
+它只是一个"输出预算"。设错了不会报错——你只会得到一段被从半句话中间截断的回复，
+并且 <code>stop_reason</code> 会是 <code>"max_tokens"</code>。</li>
+</ul>
+
+<h2>2. 响应（Response）</h2>
+
+<p>回复以<em>一组内容块（content blocks）</em>的形式返回，而不是单个字符串——因为同一条助手回复
+可能既包含文本，<em>也</em>包含一个调用工具的请求：</p>
+
+<pre><code>Message(
+    content=[ContentBlock(type="text", text="12% of 850 is 102.")],
+    stop_reason="end_turn",
+    usage=Usage(input_tokens=24, output_tokens=11),
+)</code></pre>
+
+<p><code>stop_reason</code> 就是你代码里要做分支判断的字段。<code>"end_turn"</code>
+表示模型已经把话对人说完了。第 4 课会引入 <code>"tool_use"</code>，意思正好相反：模型还没说完，
+它是在请求你的代码去执行点什么，然后再把结果带回来。</p>
+
+<div class="box concept">
+<span class="box-label">概念</span>
+<p><code>usage</code> 不是可有可无的遥测数据——它就是你这一次调用的账单，也是生产环境里你真正会
+设告警阈值去盯的数字。现在就习惯读它；第 10 课会专门回来讲成本预算。</p>
+</div>
+
+<h2>3. 到真实代码里读一遍：<code>waku/loop/agent.py</code></h2>
+
+<p>打开 <code>waku-agent</code> 仓库里的 <code>waku/loop/agent.py</code>，找到
+<code>run_loop</code> 函数。大约第 79–86 行是一次裸露、未加任何包装的
+<code>client.messages.create(...)</code> 调用——和上面完全一样的结构，只是换成了真实变量。
+再看第 91 行：</p>
+
+<pre><code>messages.append({"role": "assistant", "content": response.content})</code></pre>
+
+<div class="box why">
+<span class="box-label">为什么要这么写</span>
+<p>这一行代码<em>就是</em>解决"无状态"问题的关键。助手的回复被重新追加回
+<code>messages</code>，这样循环下一次调用时才能把它当作历史看到。如果去掉这一行，
+模型在第二轮迭代时就会"忘记"自己上一轮说过什么——因为从机制上讲，根本没有什么"服务端记忆"可以丢失。</p>
+</div>
+
+<p>现在再看文件开头（第 1–16 行）的注释块。它用七行伪代码把整个循环先写了一遍，然后才是真正的代码。
+读一下这七行，再对照真正的函数看它们贴合得有多紧。伪代码到生产代码之间的这段"落差"被刻意做得很小，
+而缩小这段落差，基本上就是这整个课程在教的东西。</p>
+
+<h2>4. 不存在"通用"的线上格式</h2>
+
+<p>打开 <code>waku/loop/models.py</code>，找到 <code>OpenAICompatClient</code> 类
+（大约第 296 行）。它唯一的工作，就是把 OpenAI 的 chat-completions 格式翻译成上面那种
+Anthropic 格式，这样代码库的其余部分就永远不用关心自己到底在跟哪个 provider 说话。</p>
+
+<p>浏览一下 <code>_to_openai</code> 和 <code>_create</code>。现在不需要看懂每一行——
+只要自己确认一下这个翻译确实做了实事：字段名不一样（<code>stop_reason</code> 对
+<code>finish_reason</code>），而且 OpenAI 那边工具调用的参数是以 JSON <em>字符串</em> 形式送过来的，
+需要先解析出来，才能变成 Anthropic 那种已经是解析好的字典的 <code>input</code>。</p>
+
+<p>完整对照表见：
+<a href="../reference/api-request-response-cheatsheet.zh.html">reference/api-request-response-cheatsheet.zh.html</a>。</p>
+
+<div class="box checkpoint">
+<span class="box-label">检查点</span>
+<div class="quiz" data-answer="0">
+  <p class="quiz-q">Anthropic Messages API 用哪个字段名告诉你代码"生成为什么停止"？</p>
+  <div class="quiz-options">
+    <button class="quiz-opt">stop_reason</button>
+    <button class="quiz-opt">stop_status</button>
+    <button class="quiz-opt">stop_result</button>
+    <button class="quiz-opt">stop_signal</button>
+  </div>
+  <p class="quiz-feedback" hidden></p>
+</div>
+</div>
+
+<div class="box checkpoint">
+<div class="quiz" data-answer="0">
+  <p class="quiz-q"><code>waku/loop/models.py</code> 为什么需要大约 110 行代码，专门把 OpenAI 的格式翻译成 Anthropic 的格式？</p>
+  <div class="quiz-options">
+    <button class="quiz-opt">两个厂商用了不同的线上格式</button>
+    <button class="quiz-opt">OpenAI模型价格比Claude便宜</button>
+    <button class="quiz-opt">Anthropic要求签订企业合同</button>
+    <button class="quiz-opt">OpenAI的SDK不支持流式输出</button>
+  </div>
+  <p class="quiz-feedback" hidden></p>
+</div>
+</div>
+
+<h2>5. 练习</h2>
+
+<div class="box exercise">
+<span class="box-label">练习 — 自己动手做，做完再拿回来一起 review</span>
+<p>写一个独立的 Python 脚本，放在 <code>waku</code> 包<strong>之外</strong>（不要 import 任何
+<code>waku.*</code>）——只用原生的 <code>anthropic</code> SDK。用这个仓库 <code>.env</code>
+里已有的 key。脚本要做到：</p>
+<ol>
+<li>发送一条 user 消息，问一个你自己知道答案的事实性问题。</li>
+<li>打印出回复文本。</li>
+<li>打印出 <code>stop_reason</code>，以及 <code>usage</code> 里的两个 token 数量。</li>
+</ol>
+<p>然后，不查任何资料，自己扩展一下：加一个 <code>system</code> 提示词，改变助手的语气或输出格式
+（比如"只用一句话回答，不要标点"），重新跑一遍，确认输出确实变了。整个练习就这些——没有工具、
+没有循环、没有框架。</p>
+
+<details>
+<summary>卡在 SDK 用法上，不是卡在概念上？（提示）</summary>
+<p><code>anthropic</code> 这个包已经是本仓库的依赖之一（见 <code>uv.lock</code>）。
+client 的构造方式和 <code>messages.create</code> 的具体关键字参数，在
+<code>waku/loop/models.py</code> 和 <code>waku/loop/agent.py</code> 里都能看到——
+允许照抄这两处的语法，这个练习的重点是理解请求/响应的结构，不是要你凭空记住 SDK 方法名。</p>
+</details>
+</div>
+
+<p>写完之后（或者卡住了）把脚本拿回聊天里——我会跟你一起 review，而不是先给你一份参考答案。</p>
+
+<p class="ask-agent">这节课里有哪里没讲清楚，或者想再深入聊聊某一点？
+随时问你的教学 agent——这就是它在这儿的意义。</p>
+
+<div class="lesson-nav">
+<span>术语表：<a href="../reference/glossary.zh.html">reference/glossary.zh.html</a></span>
+<span>下一课：第 2 模块，提示词与上下文工程——练习 review 完之后</span>
+</div>
+
+</body>
+</html>

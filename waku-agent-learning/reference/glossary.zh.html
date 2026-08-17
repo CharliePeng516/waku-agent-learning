@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>术语表 — LLM 应用开发</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<p class="kicker">参考资料 · 持续更新，每节课都会补充</p>
+<h1>术语表</h1>
+<p style="color:var(--ink-faint);margin-top:-0.6rem;">
+术语在第一次用到时加入，释义只求"能正确用在代码里"，不追求教科书式的完整。
+（<a href="./glossary.html">English version</a>）
+</p>
+
+<h2>模块 1 — LLM API 基础</h2>
+
+<dl>
+<dt><strong>Token（词元）</strong></dt>
+<dd>LLM 实际读取和计费的最小单位——一段文本片段，英文里大约是四分之三个单词，不是字符，也不是完整单词。每次请求/响应都会报告 token 数量：这既是计费依据，也是占用上下文窗口的量。</dd>
+
+<dt style="margin-top:1rem;"><strong>Context window（上下文窗口）</strong></dt>
+<dd>模型单次调用能"看到"的最大 token 数（输入+输出合计，具体上限因厂商而异）。系统提示词、对话历史、工具 schema、检索到的文档——所有内容都在争抢这个预算。</dd>
+
+<dt style="margin-top:1rem;"><strong>System prompt（系统提示词）</strong></dt>
+<dd>随消息列表一起发送、但不属于消息列表本身的一条常驻指令，模型会把它当作最高优先级的框架，而不是对话中的一轮。Anthropic API 里是独立的 <code>system</code> 参数；OpenAI 的 chat 格式里则是数组开头一条 <code>role: "system"</code> 的消息——概念相同，线上格式不同。</dd>
+
+<dt style="margin-top:1rem;"><strong>Message（消息）</strong></dt>
+<dd>对话中的一轮：<code>{"role": "user" | "assistant", "content": ...}</code>。整个数组就是完整的对话状态——LLM API 本身是无状态的，调用方每次都要把完整历史重新发一遍。</dd>
+
+<dt style="margin-top:1rem;"><strong>Content block（内容块）</strong></dt>
+<dd>Anthropic 里消息 <code>content</code> 内部的最小单元：一个带类型的对象（<code>text</code>、<code>tool_use</code>、<code>tool_result</code>、<code>image</code> 等），而不是一段纯字符串。同一条助手回复里可以同时混有一个文本块和一个 <code>tool_use</code> 块。</dd>
+
+<dt style="margin-top:1rem;"><strong>Wire format（线上格式/协议格式）</strong></dt>
+<dd>某个厂商 API 实际要求/返回的具体 JSON 结构。Anthropic 和 OpenAI 对基本相同的概念用了两套不同的结构（见<a href="./api-request-response-cheatsheet.zh.html">请求/响应速查表</a>）——并不存在唯一的"LLM API 标准"，这也是为什么 <code>waku/loop/models.py</code> 里需要 <code>OpenAICompatClient</code> 这样一层适配器。</dd>
+
+<dt style="margin-top:1rem;"><strong><code>stop_reason</code> / <code>finish_reason</code></strong></dt>
+<dd>模型为什么停止生成：例如 <code>end_turn</code>（说完了）、<code>tool_use</code>（它想调用一个工具，正在等你执行）、<code>max_tokens</code>（被截断了——输出撞到上限）。Anthropic 把这个字段叫 <code>stop_reason</code>；OpenAI 叫 <code>finish_reason</code>。agent 循环正是靠判断这个值，来决定是回复用户，还是去执行一个工具。</dd>
+
+<dt style="margin-top:1rem;"><strong>Usage（用量）</strong></dt>
+<dd>响应里附带的 token 计费信息（Anthropic 格式里是 <code>input_tokens</code> / <code>output_tokens</code>）。这就是你这一次调用的实际账单，也是做成本或延迟预算的第一手输入。</dd>
+</dl>
+
+<p class="ask-agent">遇到某节课没解释清楚的术语，可以让教学 agent 在这里补充。</p>
+
+</body>
+</html>

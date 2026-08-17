@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>API Request/Response Cheat Sheet — LLM Application Development</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<p class="kicker">Reference · module 1 — LLM API fundamentals</p>
+<h1>Request / response cheat sheet</h1>
+<p style="color:var(--ink-faint);margin-top:-0.6rem;">The two wire formats behind almost every
+LLM API you'll touch. Print this, or keep it open next to
+<a href="../lessons/0001-llm-api-fundamentals.html">lesson 1</a>.
+(<a href="./api-request-response-cheatsheet.zh.html">中文版</a>)</p>
+
+<h2>Request shape</h2>
+<table>
+<tr><th>Field</th><th>Anthropic Messages API</th><th>OpenAI Chat Completions</th></tr>
+<tr><td>Model</td><td><code>model</code></td><td><code>model</code></td></tr>
+<tr><td>Standing instructions</td><td><code>system</code> (top-level string)</td>
+    <td>a <code>{"role": "system", ...}</code> message inside <code>messages</code></td></tr>
+<tr><td>Conversation</td><td><code>messages: [{role, content}]</code></td>
+    <td><code>messages: [{role, content}]</code> — same idea</td></tr>
+<tr><td>Output length cap</td><td><code>max_tokens</code> (required)</td>
+    <td><code>max_completion_tokens</code> (older APIs: <code>max_tokens</code>)</td></tr>
+<tr><td>Available tools</td><td><code>tools: [{name, description, input_schema}]</code></td>
+    <td><code>tools: [{type: "function", function: {name, description, parameters}}]</code></td></tr>
+<tr><td>Content inside a message</td><td>list of typed <em>content blocks</em>
+    (<code>text</code>, <code>tool_use</code>, <code>tool_result</code>, <code>image</code>)</td>
+    <td>plain string, or (for tool calls) a separate <code>tool_calls</code> array
+    alongside <code>content</code></td></tr>
+</table>
+
+<h2>Response shape</h2>
+<table>
+<tr><th>Field</th><th>Anthropic</th><th>OpenAI</th></tr>
+<tr><td>Why generation stopped</td><td><code>stop_reason</code>: <code>end_turn</code>,
+    <code>tool_use</code>, <code>max_tokens</code>, …</td>
+    <td><code>choices[0].finish_reason</code>: <code>stop</code>, <code>tool_calls</code>,
+    <code>length</code>, …</td></tr>
+<tr><td>The reply itself</td><td><code>content: [ {type, ...} ]</code> — one or more blocks</td>
+    <td><code>choices[0].message.content</code> (string) +
+    <code>choices[0].message.tool_calls</code> (array, if any)</td></tr>
+<tr><td>Tool call request</td><td>a <code>{type: "tool_use", id, name, input}</code> block</td>
+    <td>an entry in <code>tool_calls</code>:
+    <code>{id, function: {name, arguments}}</code> — <code>arguments</code> is a
+    <strong>JSON string</strong> you must parse</td></tr>
+<tr><td>Token accounting</td><td><code>usage.input_tokens</code> /
+    <code>usage.output_tokens</code></td>
+    <td><code>usage.prompt_tokens</code> / <code>usage.completion_tokens</code></td></tr>
+</table>
+
+<h2>Sending a tool result back</h2>
+<p>Both formats require you to append the tool's output as a new message before calling
+the API again — the model never runs anything itself, it only <em>asks</em>.</p>
+<table>
+<tr><th>Anthropic</th><th>OpenAI</th></tr>
+<tr><td>a <code>user</code> message whose content is one or more
+    <code>{type: "tool_result", tool_use_id, content}</code> blocks</td>
+    <td>a message with <code>role: "tool"</code>,
+    <code>tool_call_id</code>, and <code>content</code></td></tr>
+</table>
+
+<div class="box why">
+<span class="box-label">Why this matters</span>
+<p>There is no single "the" LLM API. Two shapes for the same four concepts (instructions,
+history, tools, token accounting) is what you get in 2026, and most other providers copy
+one of these two almost verbatim. <code>waku/loop/models.py</code>'s
+<code>OpenAICompatClient</code> is a ~110-line adapter that translates OpenAI's shape into
+Anthropic's shape at the boundary, so the rest of the codebase — the loop, the tools, the
+tracing — only ever has to know one format. That's a real architecture decision you'll
+face the first time you support a second provider in any product.</p>
+</div>
+
+<p class="ask-agent">See <a href="./glossary.html">the glossary</a> for term definitions,
+or ask your teaching agent.</p>
+
+</body>
+</html>

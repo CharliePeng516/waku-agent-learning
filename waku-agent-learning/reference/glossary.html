@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glossary — LLM Application Development</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<p class="kicker">Reference · living document, grows every lesson</p>
+<h1>Glossary</h1>
+<p style="color:var(--ink-faint);margin-top:-0.6rem;">Terms are added the lesson they're first needed. Definitions are
+kept to what you need to use the term correctly in code — not textbook-complete.
+(<a href="./glossary.zh.html">中文版</a>)</p>
+
+<h2>Module 1 — LLM API fundamentals</h2>
+
+<dl>
+<dt><strong>Token</strong></dt>
+<dd>The unit an LLM actually reads and bills in — a chunk of text, roughly ¾ of a word in
+English. Not a character, not a word. Every request/response reports token counts; that's
+what you're billed on and what fills the context window.</dd>
+
+<dt style="margin-top:1rem;"><strong>Context window</strong></dt>
+<dd>The maximum number of tokens (input + output combined, provider-dependent) a model
+can attend to in one call. Everything you send — system prompt, message history, tool
+schemas, retrieved documents — competes for this budget.</dd>
+
+<dt style="margin-top:1rem;"><strong>System prompt</strong></dt>
+<dd>A standing instruction sent alongside (not inside) the message list, read as
+top-priority framing rather than a turn in the conversation. In Anthropic's API it's a
+dedicated <code>system</code> parameter; in OpenAI's chat format it's a message with
+<code>role: "system"</code> at the start of the array — same idea, different wire shape.</dd>
+
+<dt style="margin-top:1rem;"><strong>Message</strong></dt>
+<dd>One turn in the conversation: <code>{"role": "user" | "assistant", "content": ...}</code>.
+The full array is the entire conversation state — LLM APIs are stateless per call, so the
+caller resends the whole history every time.</dd>
+
+<dt style="margin-top:1rem;"><strong>Content block</strong></dt>
+<dd>Anthropic's unit inside a message's <code>content</code>: a typed object
+(<code>text</code>, <code>tool_use</code>, <code>tool_result</code>, <code>image</code>, …)
+rather than a plain string. A single assistant turn can mix a text block and a
+<code>tool_use</code> block in one response.</dd>
+
+<dt style="margin-top:1rem;"><strong>Wire format</strong></dt>
+<dd>The specific JSON shape a provider's API expects/returns. Anthropic and OpenAI use two
+different shapes for essentially the same concepts (see the
+<a href="./api-request-response-cheatsheet.html">request/response cheat sheet</a>) — there is
+no single "the" LLM API standard, which is why an adapter layer like
+<code>waku/loop/models.py</code>'s <code>OpenAICompatClient</code> exists.</dd>
+
+<dt style="margin-top:1rem;"><strong><code>stop_reason</code> / <code>finish_reason</code></strong></dt>
+<dd>Why the model stopped generating: e.g. <code>end_turn</code> (done talking),
+<code>tool_use</code> (it wants to call a tool and is waiting on you),
+<code>max_tokens</code> (truncated — you hit the output cap). Anthropic calls the field
+<code>stop_reason</code>; OpenAI calls it <code>finish_reason</code>. Branching on this
+value is how an agent loop knows whether to reply to the human or run a tool.</dd>
+
+<dt style="margin-top:1rem;"><strong>Usage</strong></dt>
+<dd>The token accounting on a response (<code>input_tokens</code> / <code>output_tokens</code>
+in Anthropic's shape). This is your literal bill per call and the input to any cost or
+latency budgeting.</dd>
+</dl>
+
+<p class="ask-agent">Ask your teaching agent to add a term here if you hit jargon a lesson didn't define.</p>
+
+</body>
+</html>

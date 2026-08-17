@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>API 请求/响应速查表 — LLM 应用开发</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<p class="kicker">参考资料 · 模块 1 — LLM API 基础</p>
+<h1>请求 / 响应速查表</h1>
+<p style="color:var(--ink-faint);margin-top:-0.6rem;">
+几乎所有 LLM API 背后都是这两种线上格式之一。可以打印出来，或者和
+<a href="../lessons/0001-llm-api-fundamentals.zh.html">第 1 课</a>放在一起对照看。
+（<a href="./api-request-response-cheatsheet.html">English version</a>）
+</p>
+
+<h2>请求结构</h2>
+<table>
+<tr><th>字段</th><th>Anthropic Messages API</th><th>OpenAI Chat Completions</th></tr>
+<tr><td>模型</td><td><code>model</code></td><td><code>model</code></td></tr>
+<tr><td>常驻指令</td><td>顶层字符串 <code>system</code></td>
+    <td><code>messages</code> 数组里一条 <code>{"role": "system", ...}</code> 消息</td></tr>
+<tr><td>对话历史</td><td><code>messages: [{role, content}]</code></td>
+    <td><code>messages: [{role, content}]</code> —— 思路相同</td></tr>
+<tr><td>输出长度上限</td><td><code>max_tokens</code>（必填）</td>
+    <td><code>max_completion_tokens</code>（老版本 API 用 <code>max_tokens</code>）</td></tr>
+<tr><td>可用工具</td><td><code>tools: [{name, description, input_schema}]</code></td>
+    <td><code>tools: [{type: "function", function: {name, description, parameters}}]</code></td></tr>
+<tr><td>消息内部的内容</td><td>一组带类型的<em>内容块</em>
+    （<code>text</code>、<code>tool_use</code>、<code>tool_result</code>、<code>image</code>）</td>
+    <td>普通字符串；如果是工具调用，会在 <code>content</code> 之外单独有一个 <code>tool_calls</code> 数组</td></tr>
+</table>
+
+<h2>响应结构</h2>
+<table>
+<tr><th>字段</th><th>Anthropic</th><th>OpenAI</th></tr>
+<tr><td>为什么停止生成</td><td><code>stop_reason</code>：<code>end_turn</code>、
+    <code>tool_use</code>、<code>max_tokens</code> 等</td>
+    <td><code>choices[0].finish_reason</code>：<code>stop</code>、<code>tool_calls</code>、
+    <code>length</code> 等</td></tr>
+<tr><td>回复本身</td><td><code>content: [ {type, ...} ]</code> —— 一个或多个内容块</td>
+    <td><code>choices[0].message.content</code>（字符串）+
+    <code>choices[0].message.tool_calls</code>（数组，如果有的话）</td></tr>
+<tr><td>工具调用请求</td><td>一个 <code>{type: "tool_use", id, name, input}</code> 内容块</td>
+    <td><code>tool_calls</code> 里的一项：
+    <code>{id, function: {name, arguments}}</code> —— <code>arguments</code> 是一个
+    <strong>JSON 字符串</strong>，需要自己解析</td></tr>
+<tr><td>Token 计费</td><td><code>usage.input_tokens</code> /
+    <code>usage.output_tokens</code></td>
+    <td><code>usage.prompt_tokens</code> / <code>usage.completion_tokens</code></td></tr>
+</table>
+
+<h2>把工具执行结果发回去</h2>
+<p>两种格式都要求你把工具的执行结果作为一条新消息追加进去，再发起下一次调用——模型本身从不真正执行任何东西，它只会"提出请求"。</p>
+<table>
+<tr><th>Anthropic</th><th>OpenAI</th></tr>
+<tr><td>一条 <code>user</code> 消息，内容是一个或多个
+    <code>{type: "tool_result", tool_use_id, content}</code> 内容块</td>
+    <td>一条 <code>role: "tool"</code> 的消息，带
+    <code>tool_call_id</code> 和 <code>content</code></td></tr>
+</table>
+
+<div class="box why">
+<span class="box-label">为什么这很重要</span>
+<p>不存在唯一的"标准" LLM API。2026 年的现实就是同一套四个概念（指令、历史、工具、计费）有两种不同的表达方式，而市面上其他大部分厂商基本是照抄这两种之一。
+<code>waku/loop/models.py</code> 里的 <code>OpenAICompatClient</code> 是一个约 110 行的适配器，专门在边界处把 OpenAI 的格式翻译成 Anthropic 的格式，这样代码库其余部分——循环、工具、trace——就只需要认识一种格式。等你在任何一个产品里第一次要同时支持两个厂商时，这就是一个你必须做的真实架构决策。</p>
+</div>
+
+<p class="ask-agent">术语释义见<a href="./glossary.zh.html">术语表</a>，或者直接问教学 agent。</p>
+
+</body>
+</html>
